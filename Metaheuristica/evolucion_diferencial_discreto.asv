@@ -1,0 +1,213 @@
+%% Evolución Diferencial (DE) para Sintonización de un Controlador PID
+% Discreto
+
+clc
+close all
+clear
+
+%% Modelo del sistema
+
+Tau = 125;
+K = 0.8;
+Theta = 2.1; 
+
+Num = [K];
+Den = [Tau 1];
+Gs = tf(Num, Den, 'inputdelay', Theta);
+
+% Tau equivalente
+Tau_eq = Tau + Theta/2;
+Ts1 = Tau_eq / 10;
+
+% Criterio de tiempo de establecimiento
+Gs_lc = feedback(Gs,1)
+ts = stepinfo(Gs_lc).SettlingTime; % Step de lazo cerrado 
+rango = [0.05*ts 0.15*ts]
+Ts2 = 0.05*ts; % el valor elegido de 0.05*ts<Ts<0.15*ts
+
+% Definir tiempo de muestreo
+Ts_ponderado = min([Ts1 Ts2]);
+
+% Comparación con retardo
+if Ts_ponderado < Theta
+    Ts = Ts_ponderado;
+else
+    Ts = Theta/2;
+end
+
+% Discretizar modelo
+Gz = c2d(Gs, Ts, 'zoh');
+
+%% Inicialización de parámetros de Evolución Diferencial
+
+N = 20;         % Tamaño de la población
+D = 3;          % Numero de parámetros (q0, q1, q2)
+CR = 0.9;       % Tasa de cruce (0 - 1)
+F_min = 0.9;    % Minimo valor de factor de escala (min: 0)
+F_max = 1.2;    % Maximo valor de factor de escala (max: 2)
+
+% Límites de búsqueda para q0, q1, q2
+lb = [0.1, 0.01, 0.01];
+ub = [10, 5, 5]; 
+
+% Inicializar población aleatoria dentro de los límites
+%pob = lb + rand(N, D) .* (ub - lb);
+%pob_inicial = pob;
+%writematrix(pob_inicial, 'population_results.txt');
+pob = load('population_results.txt')
+fitness = zeros(N, 1);
+
+%% Controlador inicial
+
+% Evaluar función de costo para la población inicial
+peso = 0.5; % a criterio mio
+for i = 1:N
+    fitness(i) = objective_function(pob(i, :), Gz, peso, Ts);
+end
+
+% Guardar el primer controlador generado y su costo
+[first_fitness, first_idx] = min(fitness);
+first_solution = pob(first_idx, :); % q0, q1, q2 iniciales
+
+% Discretizar el controlador inicial
+Cs_inicial_d = pid(first_solution(1), first_solution(2), first_solution(3), Ts);
+Cs_inicial_d = c2d(Cs_inicial_d, Ts, 'zoh');
+Control_inicial_d = feedback(Cs_inicial_d * Gz, 1);
+
+% Grafica comparacion de controladores discretos
+figure(1)
+step(Control_inicial_d)
+hold on
+title(['Respuesta del sistema con PID inicial (Costo = ', num2str(first_fitness), ')'])
+grid on
+
+% Obtener datos de la respuesta al escalón
+[y_init, t_init] = step(Control_inicial_d);
+info_init = stepinfo(Control_inicial_d);
+ts_init = info_init.SettlingTime;
+os_init = info_init.Overshoot;
+
+% Marcar tiempo de establecimiento y sobreimpulso
+plot([ts_init ts_init], [0 1.2*max(y_init)], 'r--')
+plot([0 t_init(end)], [1+os_init/100 1+os_init/100], 'm--')
+legend('Controlador inicial', 'Tiempo de establecimiento (ts)', 'Sobreimpulso (Mp)', 'Location', 'southeast')
+hold off
+
+%% Evolución Diferencial (Iteraciones)
+
+% Inicializacion
+MaxIt = 50; % Número máximo de iteraciones    
+
+% Proceso iterativo ED
+for iter = 1:MaxIt
+
+    for i = 1:N
+        
+        % Seleccionar 3 individuos aleatorios distintos
+        idx = randperm(N, D+1);
+        idx(idx == i) = [];          % Asegurar que i no esté en la selección
+        r1 = pob(idx(1), :);
+        r2 = pob(idx(2), :);
+        r3 = pob(idx(3), :);
+        
+        % Factor de escala (mutación)
+        F = F_min + (F_max - F_min) * rand;
+
+        % Mutación
+        V = r1 + F * (r2 - r3);
+        V = max(min(V, ub), lb);  % Restringir rango
+        
+        % Cruce
+        j_rand = randi(D); % Asegurar que al menos un valor cambie
+
+        for j = 1:D
+            if rand <= CR || j == j_rand
+                U(j) = V(j);
+            else
+                U(j) = pob(i, j);
+            end
+        end
+
+        % Asegurar que U esté dentro de los límites
+        U = max(min(U, ub), lb); % Restringuir limites
+        
+        % Evaluar el nuevo vector de prueba
+        new_fitness = objective_function(U, Gz, peso, Ts);
+        
+        % Selección: Reemplazar si la nueva solución es mejor
+        if new_fitness < fitness(i)
+            pob(i, :) = U;
+            fitness(i) = new_fitness;
+        end
+        
+    end
+    
+    % Guardar la mejor solución de esta iteración
+    [best_fitness, best_idx] = min(fitness);
+    best_solution = pob(best_idx, :);
+
+    % Guardar el mejor fitness en el historial
+    fitness_history(iter) = best_fitness;
+    
+    % Mostrar progreso
+    fprintf('Iteración %d: Mejor fitness = %.5f\n', iter, best_fitness);
+
+end
+
+%% Resultados Finales
+
+fprintf('\nMejor solución encontrada: q0 = %.5f, q1 = %.5f, q2 = %.5f', best_solution);
+fprintf('\nCosto del mejor controlador: %.5f\n', best_fitness);
+
+% Comparación con el primer controlador generado
+fprintf('\nPrimer controlador generado:\nq0 = %.5f, q1 = %.5f, q2 = %.5f', first_solution);
+fprintf('\nCosto del primer controlador: %.5f\n', first_fitness);
+
+% Discretizar el controlador inicial
+Cs_inicial_d = pid(first_solution(1), first_solution(2), first_solution(3), Ts);
+Cs_inicial_d = c2d(Cs_inicial_d, Ts, 'zoh'); 
+Control_inicial_d = feedback(Cs_inicial_d * Gz, 1);
+
+% Discretizar el controlador final
+Cs_final_d = pid(best_solution(1), best_solution(2), best_solution(3), Ts);
+Cs_final_d = c2d(Cs_final_d, Ts, 'zoh');
+Control_final_d = feedback(Cs_final_d * Gz, 1);
+
+% Grafica comparacion de controladores discretos
+figure(2)
+step(Control_final_d)
+hold on
+title('Controlador inicial vs optimizado (Discreto)')
+step(Control_inicial_d)
+legend('Controlador final','Controlador inicial', Location='southeast')
+hold off
+
+% Gráfica de minimización
+figure(3)
+plot(1:MaxIt, fitness_history, 'LineWidth', 1.5)
+xlabel('Iteraciones');
+ylabel('Valor de la función de costo');
+title('Evolución de la función de costo');
+grid on;
+
+%% Función Objetivo (Evaluación del Controlador)
+function costo = objective_function(q, Gz, peso, Ts)
+    q0 = q(1);
+    q1 = q(2);
+    q2 = q(3);
+    
+    % Crear y evaluar el controlador PID
+    Cs =  pid(q0, q1, q2, Ts);
+    Cs = c2d(Cs, Ts, 'zoh');
+    Control = feedback(Cs * Gz, 1);
+    
+    % Obtener métricas de desempeño
+    C_aux = stepinfo(Control);
+    
+    if isnan(C_aux.SettlingTime) || isnan(C_aux.Overshoot)
+        costo = inf; % Sistema es inestable
+    else
+        costo = peso * C_aux.SettlingTime + C_aux.Overshoot;
+    end
+   
+end 

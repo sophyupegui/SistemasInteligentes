@@ -1,0 +1,43 @@
+############################
+# ROOT-LEVEL IGNORES
+############################
+
+# Explicit files to ignore at repo root
+ex_controlador_plantapresion.m
+guion_ED.docx
+
+# MATLAB / Simulink build artifacts
+slprj/
+
+
+############################
+# FUZZY
+############################
+
+# Ignore everything inside Fuzzy/Labview fuzz/escrito
+Fuzzy/Labview fuzz/escrito/
+
+# Ignore Simulink cache in Fuzzy/Labview fuzz
+Fuzzy/Labview fuzz/slprj/
+
+# Ignore Simulink cache in Fuzzy/Multiple
+Fuzzy/Multiple/slprj/
+
+
+############################
+# METAHEURISTICA
+############################
+
+# Ignore entire folder (contains only JPGs, per your description)
+Metaheuristica/inv_escrito/
+
+
+############################
+# PARCIAL
+############################
+
+# Ignore Simulink cache
+Parcial/slprj/
+
+# Ignore specific file
+Parcial/salo_adaline_t2.m
